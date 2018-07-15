@@ -1,25 +1,4 @@
 ﻿use ida_data;
-/*
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-ALTER PROCEDURE [dbo].[CursorTemplate]
-AS
-*/
-
-/* Step 1: Create table of all records for patients */
-/* check table structure */
-/*
-select top 100 a.* 
-from athena.patientmedication a
-inner join
-     athena.Medication b
-on a.context_id=b.context_id and
-   a.medicationID=b.medicationID
-where upper(b.HIC3Description) like ('%NARCOTICS%') 
-order by a.context_id, a.patientid, FillDate;
-*/
 
 /* Alex's code
 from dsz_dwf_3nf.dsz_document_3nf a 
@@ -427,6 +406,8 @@ order by unique_patient, EncounterDate;
 			create index athena_mems_idxU on [DSDWDev].aw.AW_athena_opioids_memdetail_july3(unique_patient);
 			--create index athena_mems_idxCLM on [DSDWDev].aw.AW_athena_opioids_memdetail_july3(claimid);
 
+			select top 100 * from [DSDWDev].aw.AW_athena_opioids_memdetail_july3;
+
 			/* check copied table */
 			select new_ct, old_ct, new_ct-old_ct as ct_delta, new_mems, old_mems, new_mems-old_mems as mem_delta
 			from (select count(*) as new_ct, count(distinct unique_patient) as new_mems from [DSDWDev].aw.AW_athena_opioids_memdetail_july3) a,
@@ -731,16 +712,40 @@ order by rowid_encounter;
 			57310	57310	0	20310	20310	0
 			*/
 
+/* merge tables */
+IF OBJECT_ID('tempdb.dbo.#temp4', 'U') IS NOT NULL DROP TABLE #temp4;
+select a.*, lag_filldate, current_filldate, filldatediff, cumul_filldatediff
+into #temp4
+from #wells_opioid_cumul_with_strata_percent a
+inner join
+     #temp3 b
+on a.unique_patient=b.unique_patient and
+   a.rowid_encounter=b.rowid_encounter;
+
+   			/* check new table */
+			select new_ct, old_ct, new_ct-old_ct as ct_delta, new_mems, old_mems, new_mems-old_mems as mem_delta
+			from (select count(*) as new_ct, count(distinct unique_patient) as new_mems from #temp4) a,
+				 (select count(*) as old_ct, count(distinct unique_patient) as old_mems from #wells_opioid_cumul_with_strata_percent) b;
+			/*
+			new_ct	old_ct	ct_delta	new_mems	old_mems	mem_delta
+			37000	57310	-20310			9219	20310		-11091
+			*/
+/* end */
+
 /* put into permanent table */
 		drop table [DSDWDev].dbo.AW_athena_opioids_FINAL_july13;
 	select *
 	into [DSDWDev].dbo.AW_athena_opioids_FINAL_july13
-	from #temp3;
+	from #temp4;
 			create index athena_mems_idxU on [DSDWDev].dbo.AW_athena_opioids_FINAL_july13(unique_patient);
+
+			select top 100 * from [DSDWDev].dbo.AW_athena_opioids_FINAL_july13;
 
 			/* check copied table */
 			select new_ct, old_ct, new_ct-old_ct as ct_delta, new_mems, old_mems, new_mems-old_mems as mem_delta
 			from (select count(*) as new_ct, count(distinct unique_patient) as new_mems from [DSDWDev].dbo.AW_athena_opioids_FINAL_july13) a,
 				 (select count(*) as old_ct, count(distinct unique_patient) as old_mems from #temp3) b;
 /* end step 6 */
+
+use DSDWDev;
 /******************************************************************************************************************/
