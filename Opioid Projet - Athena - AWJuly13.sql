@@ -397,20 +397,20 @@ order by unique_patient, EncounterDate;
 		     (select count(*) as old_ct, count(distinct unique_patient) as old_mems from #wells_june29_athena_mems_rx) b;
 	   
 /* put into permanent table */
-		drop table [DSDWDev].aw.AW_athena_opioids_memdetail_july3;
+		drop table [DSDWDev].dbo.AW_athena_opioids_memdetail_july3;
 	select *
-	into [DSDWDev].aw.AW_athena_opioids_memdetail_july3
+	into [DSDWDev].dbo.AW_athena_opioids_memdetail_july3
 	from #wells_june29_athena_temp1;
 		    --create index athena_mems_idxP on [DSDWDev].aw.AW_athena_opioids_memdetail_july3(patientid);
-			create index athena_mems_idxC on [DSDWDev].aw.AW_athena_opioids_memdetail_july3(context_id);
-			create index athena_mems_idxU on [DSDWDev].aw.AW_athena_opioids_memdetail_july3(unique_patient);
+			create index athena_mems_idxC on [DSDWDev].dbo.AW_athena_opioids_memdetail_july3(context_id);
+			create index athena_mems_idxU on [DSDWDev].dbo.AW_athena_opioids_memdetail_july3(unique_patient);
 			--create index athena_mems_idxCLM on [DSDWDev].aw.AW_athena_opioids_memdetail_july3(claimid);
 
-			select top 100 * from [DSDWDev].aw.AW_athena_opioids_memdetail_july3;
+			select top 100 * from [DSDWDev].dbo.AW_athena_opioids_memdetail_july3;
 
 			/* check copied table */
 			select new_ct, old_ct, new_ct-old_ct as ct_delta, new_mems, old_mems, new_mems-old_mems as mem_delta
-			from (select count(*) as new_ct, count(distinct unique_patient) as new_mems from [DSDWDev].aw.AW_athena_opioids_memdetail_july3) a,
+			from (select count(*) as new_ct, count(distinct unique_patient) as new_mems from [DSDWDev].dbo.AW_athena_opioids_memdetail_july3) a,
 				 (select count(*) as old_ct, count(distinct unique_patient) as old_mems from #wells_june29_athena_temp1) b;
 /* end step 6 */
 
@@ -429,7 +429,7 @@ select distinct unique_patient,
 				sum(depression_visits) as depression_visits_total,
 				sum(diagnosiscode_all_total) as diagnosiscode_all_total
 into #wells_june29_athena_temp2
-from [DSDWDev].aw.AW_athena_opioids_memdetail_july3
+from [DSDWDev].dbo.AW_athena_opioids_memdetail_july3
 group by unique_patient;
 	--create index athena_mems_idxP on [DSDWDev].aw.#wells_june29_athena_temp2(patientid);
 	--create index athena_mems_idxC on [DSDWDev].aw.#wells_june29_athena_temp2(context_id);
@@ -545,7 +545,7 @@ select distinct unique_patient, age_cohort, gender, Race, MaritalStatus, emergen
 			    sum(osteoporosis_visits) as osteoporosis_visits,
 			    sum(copd_visits) as copd_visits,
 			    sum(stroke_visits) as stroke_visits 
-from [DSDWDev].aw.AW_athena_opioids_memdetail_july3
+from [DSDWDev].dbo.AW_athena_opioids_memdetail_july3
 group by unique_patient, age_cohort, gender, Race, MaritalStatus, emergency_contact_flag, context_id
 ) a;
 	create index athena_mems_idxU on #wells_june29_athena_strata(unique_patient);
@@ -748,4 +748,8 @@ on a.unique_patient=b.unique_patient and
 /* end step 6 */
 
 use DSDWDev;
+ 
+select top 100 * from [DSDWDev].dbo.AW_athena_opioids_memdetail_july3;  /* ClinicalEncounterID */
+
+select top 100 * from [DSDWDev].dbo.AW_athena_opioids_FINAL_july13;  /* encounterdate */
 /******************************************************************************************************************/
