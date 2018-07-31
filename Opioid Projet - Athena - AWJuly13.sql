@@ -489,10 +489,10 @@ group by unique_patient;
 		      ORDER BY diagnosiscode_all_total DESC) a; --4  
 	/* end Step 8a */
 
-/* Step 8b */ 
+/* Step 8b */
 IF OBJECT_ID('tempdb.dbo.#wells_june29_athena_strata', 'U') IS NOT NULL DROP TABLE #wells_june29_athena_strata;
 select distinct unique_patient,
-concat(age_cohort, /*' | ', gender, ' | ',  Race, ' | ',  MaritalStatus, ' | ',  emergency_contact_flag, ' | ', context_id, ' | ',*/
+concat(age_cohort, ' | ', /*gender, ' | ',  Race, ' | ',  MaritalStatus, ' | ',  emergency_contact_flag, ' | ', context_id, ' | ',*/
               (case when diabetes_visits+hf_visits+ischemic_hd_visits+kidney_disease_visits+osteoporosis_visits+copd_visits+stroke_visits=0 then 'no disease' 
 			        when diabetes_visits+hf_visits+ischemic_hd_visits+kidney_disease_visits+osteoporosis_visits+copd_visits+stroke_visits=1 then '1 chronic' 
 					when diabetes_visits+hf_visits+ischemic_hd_visits+kidney_disease_visits+osteoporosis_visits+copd_visits+stroke_visits>1 then '2+ chronics' end), ' | ',
@@ -787,6 +787,11 @@ from [DSDWDev].dbo.AW_athena_opioids_memdetail_july31;
 row_ct	distinct_mems
 285925	86551
 */
+
+select distinct micro_strata, count(distinct unique_patient) as mem_count
+from [DSDWDev].dbo.AW_athena_opioids_cumul_strata_july31
+group by micro_strata
+order by 2 desc;
 
 
 /* row counts differ b/c take distinct encounterdate, absent clinicalencounterid - multiples of the latter for the former */
