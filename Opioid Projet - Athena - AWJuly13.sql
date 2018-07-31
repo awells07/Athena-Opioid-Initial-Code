@@ -1,5 +1,9 @@
 ﻿use ida_data;
 
+
+/* NEED to update code for "positive drug screen results" */
+
+
 /* Alex's code
 from dsz_dwf_3nf.dsz_document_3nf a 
     join dsz_dwf_3nf.dsz_clinicalencounter_3nf b 
@@ -39,7 +43,15 @@ use ida_data;
 
 /* check out tables */
 select top 100 * from athena.documentappointmentrequest;
+
 select distinct medicationtype from athena.PatientMedication order by 1;
+
+select distinct MedicationName, HIC3Description
+from athena.Medication 
+where upper(MedicationName) like ('%SUBUTEX%') or
+      upper(MedicationName) like ('%SUBOXONE%') or
+	  upper(MedicationName) like ('%BUPRENORPHINE%')
+order by 2;
 /* end */
 
 /* Step a - create base fill table */
@@ -67,10 +79,14 @@ inner join
 on doc.context_id=ch.context_id and
    doc.ChartID=ch.ChartID
 inner join
-     athena.Medication med
+     (select *
+	  from athena.Medication 
+	  where HIC3Description not in ('NARCOTIC WITHDRAWAL THERAPY AGENTS') or
+	        MedicationName not in ('buprenorphine-naloxone','Suboxone')) med
 on doc.context_id=med.context_id and
    doc.FBDMedID=med.FDBMedID
-where upper(med.HIC3Description) like ('%NARCOTICS%') or
+where upper(med.HIC3Description) like ('%METHADONE%') or
+      upper(med.HIC3Description) like ('%NARCOTIC%') or
 	  upper(med.MedicationName) like ('%AVINZA%') or 
 	  upper(med.MedicationName) like ('%BUTRANS%') or 
 	  upper(med.MedicationName) like ('%DOLOPHINE%') or 
@@ -174,18 +190,20 @@ on a.context_id=b.context_id and
 /* end step 2 */
 
 /* Step 3: Create surgery table */
-select top 100 * from athena.patientsurgery;
+select top 100 * from athena.patientsurgery where [Procedure] is NULL;
+
+select distinct [Procedure], count(*) as freq from athena.patientsurgery group by [Procedure] order by 2 desc;
 
 IF OBJECT_ID('tempdb.dbo.#wells_june29_athena_patsurg', 'U') IS NOT NULL DROP TABLE #wells_june29_athena_patsurg;
 select distinct unique_patient, count(surgery_procedure) as surg_procs_all, count(distinct surgery_procedure) as surg_procs_distinct,
-                case when count(surgery_procedure)=0 then 'no surgery' 
+                case when count(surgery_procedure)=0 then 'unlabeled surgery' 
 				     when count(surgery_procedure)>count(distinct surgery_procedure) then 'same proc >1' 
 						else 'unique' end as surgery_uniqueness_ratio
 into #wells_june29_athena_patsurg
 from
 (
-select ch.context_id, ch.EnterpriseID, concat(ch.context_id,' - ', ch.EnterpriseID) as unique_patient, [Procedure] as surgery_procedure, 
-       surgerydatetime, note as surgey_note
+select ch.context_id, ch.EnterpriseID, ch.ChartID, concat(ch.context_id,' - ', ch.EnterpriseID) as unique_patient,
+       surgerydatetime, note as surgey_note, case when [Procedure] is NULL then [Note] else [Procedure] end as surgery_procedure
 from athena.patientsurgery ps
 inner join
      athena.Chart ch
@@ -244,6 +262,7 @@ select distinct unique_patient, ClinicalEncounterID,
 				sum(case when pain_type='ear pain' then 1 else 0 end) as ear_pain_visits,
 				sum(case when pain_type='eye pain' then 1 else 0 end) as eye_pain_visits,
 				sum(case when pain_type='headache' then 1 else 0 end) as headache_visits,
+				sum(case when pain_type='migrane' then 1 else 0 end) as migrane_visits,
 				sum(case when pain_type='joint pain' then 1 else 0 end) as joint_pain_visits,
 				sum(case when pain_type='limb pain' then 1 else 0 end) as limb_pain_visits,
 				--sum(case when pain_type='lumbar region pain' then 1 else 0 end) as lumbar_pain_visits,
@@ -286,6 +305,7 @@ select distinct rx.context_id, rx.EnterpriseID, rx.unique_patient, lu.diagnosisc
              when substring(lu.DiagnosisCode,1,4) in ('H920') then 'ear pain'
              when substring(lu.DiagnosisCode,1,4) in ('H571') then 'eye pain'
              when substring(lu.DiagnosisCode,1,3) in ('R51') then 'headache'
+			 when substring(lu.DiagnosisCode,1,6) in ('G43909','G43919','G43911') then 'migrane'
              when substring(lu.DiagnosisCode,1,4) in ('M255') then 'joint pain'
              when substring(lu.DiagnosisCode,1,4) in ('M796') then 'limb pain'
              --when substring(lu.DiagnosisCode,1,4) in ('M545') then 'lumbar region pain'
@@ -342,8 +362,7 @@ group by unique_patient, ClinicalEncounterID;
 								       from #wells_june29_athena_clmdx
 									   group by unique_patient, ClinicalEncounterID
 									   having count(*)>1) a)
-		order by 3, 5; 
-								 
+		order by 3, 5; 						 
 /* end step 5 */
 
 
@@ -359,19 +378,14 @@ select mems.*, rx.documentid, rx.EncounterDate, rx.medicationtype, rx.ndc, rx.FB
 	   isnull(depression_recurrent_visits,0) as depression_recurrent_visits, isnull(unspecified_pain_visits,0) as unspecified_pain_visits, 
 	   isnull(nec_pain_visits,0) as nec_pain_visits, isnull(abdomen_pain_visits,0) as abdomen_pain_visits, isnull(back_pain_visits,0) as back_pain_visits, 
 	   isnull(breast_pain_visits,0) as breast_pain_visits, isnull(chest_pain_visits,0) as chest_pain_visits, isnull(ear_pain_visits,0) as ear_pain_visits, 
-	   isnull(eye_pain_visits,0) as eye_pain_visits, isnull(headache_visits,0) as headache_visits, isnull(joint_pain_visits,0) as joint_pain_visits, 
-	   isnull(limb_pain_visits,0) as limb_pain_visits, /*lumbar_pain_visits,*/ isnull(pelvic_perineal_visits,0) as pelvic_perineal_visits, 
-	   isnull(kidney_stones_visits,0) as kidney_stone_pain_visits,isnull(ankle_foot_visits,0) as ankle_foot_pain_visits,
-	   isnull(shoulder_pain_visits,0) as shoulder_pain_visits, isnull(spine_pain_visits,0) as spine_pain_visits, 
-	   isnull(throat_pain_visits,0) as throat_pain_visits, isnull(tongue_pain_visits,0) as tongue_pain_visits, 
-	   isnull(tooth_pain_visits,0) as tooth_pain_visits, isnull(renal_colic_visits,0) as renal_colic_visits, 
-	   isnull(psych_pain_visits,0) as psych_pain_visits,
-	   isnull(diabetes_visits,0) as diabetes_visits, 
-	   isnull(hf_visits,0) as hf_visits,
-	   isnull(ischemic_hd_visits,0) as ischemic_hd_visits,
-	   isnull(kidney_disease_visits,0) as kidney_disease_visits,
-	   isnull(osteoporosis_visits,0) as osteoporosis_visits,
-	   isnull(copd_visits,0) as copd_visits,
+	   isnull(eye_pain_visits,0) as eye_pain_visits, isnull(headache_visits,0) as headache_visits, isnull(migrane_visits,0) as migrane_visits, 
+	   isnull(joint_pain_visits,0) as joint_pain_visits, isnull(limb_pain_visits,0) as limb_pain_visits, /*lumbar_pain_visits,*/ 
+	   isnull(pelvic_perineal_visits,0) as pelvic_perineal_visits, isnull(kidney_stones_visits,0) as kidney_stone_pain_visits,
+	   isnull(ankle_foot_visits,0) as ankle_foot_pain_visits, isnull(shoulder_pain_visits,0) as shoulder_pain_visits, 
+	   isnull(spine_pain_visits,0) as spine_pain_visits, isnull(throat_pain_visits,0) as throat_pain_visits, isnull(tongue_pain_visits,0) as tongue_pain_visits, 
+	   isnull(tooth_pain_visits,0) as tooth_pain_visits, isnull(renal_colic_visits,0) as renal_colic_visits, isnull(psych_pain_visits,0) as psych_pain_visits,
+	   isnull(diabetes_visits,0) as diabetes_visits, isnull(hf_visits,0) as hf_visits, isnull(ischemic_hd_visits,0) as ischemic_hd_visits,
+	   isnull(kidney_disease_visits,0) as kidney_disease_visits, isnull(osteoporosis_visits,0) as osteoporosis_visits, isnull(copd_visits,0) as copd_visits,
 	   isnull(stroke_visits,0) as stroke_visits 
 into #wells_june29_athena_temp1
 from #wells_june29_athena_distmems mems
@@ -397,21 +411,25 @@ order by unique_patient, EncounterDate;
 		     (select count(*) as old_ct, count(distinct unique_patient) as old_mems from #wells_june29_athena_mems_rx) b;
 	   
 /* put into permanent table */
-		drop table [DSDWDev].dbo.AW_athena_opioids_memdetail_july3;
+		drop table [DSDWDev].dbo.AW_athena_opioids_memdetail_july31;
 	select *
-	into [DSDWDev].dbo.AW_athena_opioids_memdetail_july3
+	into [DSDWDev].dbo.AW_athena_opioids_memdetail_july31
 	from #wells_june29_athena_temp1;
 		    --create index athena_mems_idxP on [DSDWDev].aw.AW_athena_opioids_memdetail_july3(patientid);
-			create index athena_mems_idxC on [DSDWDev].dbo.AW_athena_opioids_memdetail_july3(context_id);
-			create index athena_mems_idxU on [DSDWDev].dbo.AW_athena_opioids_memdetail_july3(unique_patient);
+			create index athena_mems_idxC on [DSDWDev].dbo.AW_athena_opioids_memdetail_july31(context_id);
+			create index athena_mems_idxU on [DSDWDev].dbo.AW_athena_opioids_memdetail_july31(unique_patient);
 			--create index athena_mems_idxCLM on [DSDWDev].aw.AW_athena_opioids_memdetail_july3(claimid);
 
-			select top 100 * from [DSDWDev].dbo.AW_athena_opioids_memdetail_july3;
+			select top 100 * from [DSDWDev].dbo.AW_athena_opioids_memdetail_july31 order by unique_patient, EncounterDate;
 
 			/* check copied table */
 			select new_ct, old_ct, new_ct-old_ct as ct_delta, new_mems, old_mems, new_mems-old_mems as mem_delta
-			from (select count(*) as new_ct, count(distinct unique_patient) as new_mems from [DSDWDev].dbo.AW_athena_opioids_memdetail_july3) a,
+			from (select count(*) as new_ct, count(distinct unique_patient) as new_mems from [DSDWDev].dbo.AW_athena_opioids_memdetail_july31) a,
 				 (select count(*) as old_ct, count(distinct unique_patient) as old_mems from #wells_june29_athena_temp1) b;
+			/*
+				new_ct		old_ct		ct_delta	new_mems	old_mems	mem_delta
+				285925		285925		0			86551		86551		0
+		   */
 /* end step 6 */
 
 
@@ -429,7 +447,7 @@ select distinct unique_patient,
 				sum(depression_visits) as depression_visits_total,
 				sum(diagnosiscode_all_total) as diagnosiscode_all_total
 into #wells_june29_athena_temp2
-from [DSDWDev].dbo.AW_athena_opioids_memdetail_july3
+from [DSDWDev].dbo.AW_athena_opioids_memdetail_july31
 group by unique_patient;
 	--create index athena_mems_idxP on [DSDWDev].aw.#wells_june29_athena_temp2(patientid);
 	--create index athena_mems_idxC on [DSDWDev].aw.#wells_june29_athena_temp2(context_id);
@@ -461,13 +479,20 @@ group by unique_patient;
 	FROM (SELECT TOP 50 PERCENT diagnosiscode_all_total 
 		  FROM #wells_june29_athena_temp2 
 		  WHERE diagnosiscode_all_total>0 
-		  ORDER BY diagnosiscode_all_total DESC) a; --5
+		  ORDER BY diagnosiscode_all_total DESC) a; --4
+	
+
+		SELECT MIN(diagnosiscode_all_total) 
+		FROM (SELECT TOP 50 PERCENT diagnosiscode_all_total 
+		      FROM #wells_june29_athena_temp2
+		      WHERE diagnosiscode_all_total>0 
+		      ORDER BY diagnosiscode_all_total DESC) a; --4  
 	/* end Step 8a */
 
-/* Step 8b */
+/* Step 8b */ 
 IF OBJECT_ID('tempdb.dbo.#wells_june29_athena_strata', 'U') IS NOT NULL DROP TABLE #wells_june29_athena_strata;
 select distinct unique_patient,
-concat(age_cohort, ' | ', gender, ' | ',  Race, ' | ',  /*MaritalStatus, ' | ',  emergency_contact_flag, ' | ', context_id, ' | ',*/
+concat(age_cohort, /*' | ', gender, ' | ',  Race, ' | ',  MaritalStatus, ' | ',  emergency_contact_flag, ' | ', context_id, ' | ',*/
               (case when diabetes_visits+hf_visits+ischemic_hd_visits+kidney_disease_visits+osteoporosis_visits+copd_visits+stroke_visits=0 then 'no disease' 
 			        when diabetes_visits+hf_visits+ischemic_hd_visits+kidney_disease_visits+osteoporosis_visits+copd_visits+stroke_visits=1 then '1 chronic' 
 					when diabetes_visits+hf_visits+ischemic_hd_visits+kidney_disease_visits+osteoporosis_visits+copd_visits+stroke_visits>1 then '2+ chronics' end), ' | ',
@@ -479,7 +504,7 @@ concat(age_cohort, ' | ', gender, ' | ',  Race, ' | ',  /*MaritalStatus, ' | ', 
 			  (case when copd_visits=0 or copd_visits is null then 'not copd' when copd_visits>1 then 'copd' end), ' | ',
 			  (case when stroke_visits=0 or stroke_visits is null then 'not stroke' when stroke_visits>1 then 'stroke' end), ' | ',*/
 	          (case when surg_procs_all=0 or surg_procs_all is null then 'No Surgery' else 'Surgery' end), ' | ',  
-			  (case when diagnosiscode_all_total=0 or diagnosiscode_all_total is null then '0 dx' when diagnosiscode_all_total <=5 then 'med dx' else '>med dx' end), ' | ', 
+			  (case when diagnosiscode_all_total=0 or diagnosiscode_all_total is null then '0 dx' when diagnosiscode_all_total <=4 then 'med dx' else '>med dx' end), ' | ', 
 			  (case when oncology_visits_total=0 or oncology_visits_total is null then '0 onc' when oncology_visits_total <2 then 'med onc' else '>med onc' end), ' | ', 
 			  (case when pain_visits_total=0 or pain_visits_total is null then '0 pain' when pain_visits_total <=2 then 'med pain' else '>med pain' end), ' | ',
 			  (case when depression_visits_total=0 or depression_visits_total is null then '0 depress' when depression_visits_total <2 then 'med depress' else '>med depress' end)
@@ -509,7 +534,7 @@ concat(age_cohort, ' | ', gender, ' | ',  Race, ' | ',  /*MaritalStatus, ' | ', 
 into #wells_june29_athena_strata
 from
 (
-select distinct unique_patient, age_cohort, gender, Race, MaritalStatus, emergency_contact_flag, context_id,
+select distinct unique_patient, age_cohort, /*gender, Race, MaritalStatus, emergency_contact_flag, context_id,*/
                 sum(diagnosiscode_all_total) as diagnosiscode_all_total,
 				sum(surg_procs_all) as surg_procs_all,
                 sum(oncology_visits) as oncology_visits_total,
@@ -528,6 +553,7 @@ select distinct unique_patient, age_cohort, gender, Race, MaritalStatus, emergen
 				sum(ear_pain_visits) as ear_pain_visits,
 				sum(eye_pain_visits) as eye_pain_visits,
 				sum(headache_visits) as headache_visits,
+				sum(migrane_visits) as migrane_visits,
 				sum(joint_pain_visits) as joint_pain_visits,
 				sum(limb_pain_visits) as limb_pain_visits,
 				sum(pelvic_perineal_visits) as pelvic_perineal_visits,
@@ -545,8 +571,8 @@ select distinct unique_patient, age_cohort, gender, Race, MaritalStatus, emergen
 			    sum(osteoporosis_visits) as osteoporosis_visits,
 			    sum(copd_visits) as copd_visits,
 			    sum(stroke_visits) as stroke_visits 
-from [DSDWDev].dbo.AW_athena_opioids_memdetail_july3
-group by unique_patient, age_cohort, gender, Race, MaritalStatus, emergency_contact_flag, context_id
+from [DSDWDev].dbo.AW_athena_opioids_memdetail_july31
+group by unique_patient, age_cohort/*, gender, Race, MaritalStatus, emergency_contact_flag, context_id*/
 ) a;
 	create index athena_mems_idxU on #wells_june29_athena_strata(unique_patient);
 	create index athena_mems_idxS on #wells_june29_athena_strata(micro_strata);
@@ -573,7 +599,7 @@ IF OBJECT_ID('tempdb.dbo.#temp1', 'U') IS NOT NULL DROP TABLE #temp1;
 select distinct unique_patient, encounterdate, ndc, prescriptionfillquantity,
 	             concat(convert(varchar,encounterdate,102), ndc, prescriptionfillquantity) as tiebreaker
 into #temp1
-from [DSDWDev].aw.AW_athena_opioids_memdetail_july3
+from [DSDWDev].dbo.AW_athena_opioids_memdetail_july31
 where year(EncounterDate)>2016
 order by unique_patient, encounterdate;
 		select * from #temp1 where unique_patient='7598 - 100551' order by EncounterDate; 
@@ -676,8 +702,8 @@ order by 1, 5;
 			from (select count(*) as new_ct, count(distinct unique_patient) as new_mems from #temp1) a,
 				 (select count(*) as old_ct, count(distinct unique_patient) as old_mems from #wells_opioid_cumul_with_strata_percent) b;
 			/*
-			new_ct	old_ct	ct_delta	new_mems	old_mems	mem_delta
-			37000	57310	-20310			9219	20310		-11091
+			new_ct		old_ct		ct_delta	new_mems	old_mems		mem_delta
+			162013		248564		-86551		39026		86551			-47525
 			*/
 
 IF OBJECT_ID('tempdb.dbo.#temp2', 'U') IS NOT NULL DROP TABLE #temp2;
@@ -685,7 +711,7 @@ select *
 into #temp2
 from #wells_opioid_cumul_with_strata_percent
 where concat(unique_patient,rowid_encounter) not in (select distinct identifier from (select concat(unique_patient,rowid_encounter) as identifier from #temp1) a)
-order by unique_patient, rowid_encounter; /* (20310 rows affected) -- matches to row delta from #temp1 */
+order by unique_patient, rowid_encounter; /* (86551 rows affected) -- matches to ct_delta from #temp1 */
 		select * from #temp2 order by unique_patient, encounterdate /* 7598 - 100551 */
 
 IF OBJECT_ID('tempdb.dbo.#temp3', 'U') IS NOT NULL DROP TABLE #temp3;
@@ -709,7 +735,7 @@ order by rowid_encounter;
 				 (select count(*) as old_ct, count(distinct unique_patient) as old_mems from #wells_opioid_cumul_with_strata_percent) b;
 			/*
 			new_ct	old_ct	ct_delta	new_mems	old_mems	mem_delta
-			57310	57310	0	20310	20310	0
+			248564	248564	0			86551		86551		0
 			*/
 
 /* merge tables */
@@ -728,28 +754,54 @@ on a.unique_patient=b.unique_patient and
 				 (select count(*) as old_ct, count(distinct unique_patient) as old_mems from #wells_opioid_cumul_with_strata_percent) b;
 			/*
 			new_ct	old_ct	ct_delta	new_mems	old_mems	mem_delta
-			37000	57310	-20310			9219	20310		-11091
+			248564	248564	0			86551		86551		0
 			*/
 /* end */
 
-/* put into permanent table */
-		drop table [DSDWDev].dbo.AW_athena_opioids_FINAL_july13;
+/* put into permanent table */ 
+		drop table [DSDWDev].dbo.AW_athena_opioids_cumul_strata_july31;
 	select *
-	into [DSDWDev].dbo.AW_athena_opioids_FINAL_july13
+	into [DSDWDev].dbo.AW_athena_opioids_cumul_strata_july31
 	from #temp4;
-			create index athena_mems_idxU on [DSDWDev].dbo.AW_athena_opioids_FINAL_july13(unique_patient);
+			create index athena_mems_idxU on [DSDWDev].dbo.AW_athena_opioids_cumul_strata_july31(unique_patient);
 
-			select top 100 * from [DSDWDev].dbo.AW_athena_opioids_FINAL_july13;
+			select top 100 * from [DSDWDev].dbo.AW_athena_opioids_cumul_strata_july31 order by unique_patient, EncounterDate;
 
 			/* check copied table */
 			select new_ct, old_ct, new_ct-old_ct as ct_delta, new_mems, old_mems, new_mems-old_mems as mem_delta
-			from (select count(*) as new_ct, count(distinct unique_patient) as new_mems from [DSDWDev].dbo.AW_athena_opioids_FINAL_july13) a,
+			from (select count(*) as new_ct, count(distinct unique_patient) as new_mems from [DSDWDev].dbo.AW_athena_opioids_cumul_strata_july31) a,
 				 (select count(*) as old_ct, count(distinct unique_patient) as old_mems from #temp3) b;
 /* end step 6 */
 
-use DSDWDev;
- 
-select top 100 * from [DSDWDev].dbo.AW_athena_opioids_memdetail_july3;  /* ClinicalEncounterID */
 
-select top 100 * from [DSDWDev].dbo.AW_athena_opioids_FINAL_july13;  /* encounterdate */
+select count(*) as row_ct, count(distinct unique_patient) as distinct_mems 
+from [DSDWDev].dbo.AW_athena_opioids_cumul_strata_july31;
+/*
+row_ct	distinct_mems
+248564	86551
+*/
+
+select count(*) as row_ct, count(distinct unique_patient) as distinct_mems 
+from [DSDWDev].dbo.AW_athena_opioids_memdetail_july31;
+/*
+row_ct	distinct_mems
+285925	86551
+*/
+
+
+/* row counts differ b/c take distinct encounterdate, absent clinicalencounterid - multiples of the latter for the former */
+select *
+from [DSDWDev].dbo.AW_athena_opioids_memdetail_july31
+where unique_patient in (select distinct unique_patient
+                         from (select distinct unique_patient, EncounterDate, count(*) as freq
+						       from (select distinct unique_patient, EncounterDate, ClinicalEncounterID
+							         from [DSDWDev].dbo.AW_athena_opioids_memdetail_july31) a
+							   group by unique_patient, EncounterDate
+							   having count(*)>1) b)
+order by unique_patient, EncounterDate;
+
+ 
+select top 100 * from [DSDWDev].dbo.AW_athena_opioids_memdetail_july31;  /* ClinicalEncounterID */
+
+select top 100 * from [DSDWDev].dbo.AW_athena_opioids_cumul_strata_july31;  /* encounterdate */
 /******************************************************************************************************************/
